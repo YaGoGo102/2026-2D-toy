@@ -1,17 +1,15 @@
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // パスの先頭のスラッシュを取り除いてターゲットURLを取得
-    // 例: "/https://discord.com/" -> "https://discord.com/"
-    const targetUrlStr = url.pathname.slice(1) + url.search;
-
-    if (!targetUrlStr.startsWith("http")) {
-      return new Response("使い方: https://自分のWorkerのURL/https://discord.com/", { status: 400 });
-    }
-
-    // ターゲットURLにリクエストを中継して中身をそのまま返す
-    const targetUrl = new URL(targetUrlStr);
+    // 転送先のベースURL
+    const targetBase = "https://sercrest.goku";
+    
+    // ワーカーへのアクセス（例: https://2026-2d-toy.goku-0102-gg.workers.dev/about ）の
+    // パスとクエリをそのままターゲットURLに結合する
+    const targetUrl = new URL(targetBase + url.pathname + url.search);
+    
+    // 元のリクエストのヘッダーやメソッドを引き継ぐ
     const modifiedRequest = new Request(targetUrl, {
       method: request.method,
       headers: request.headers,
@@ -19,6 +17,15 @@ export default {
       redirect: "follow"
     });
 
-    return fetch(modifiedRequest);
+    try {
+      // ターゲットサイトからデータを取得してそのまま返す
+      const response = await fetch(modifiedRequest);
+      
+      // レスポンスヘッダーを複製して、必要に応じてCORS等を調整
+      const newResponse = new Response(response.body, response);
+      return newResponse;
+    } catch (e) {
+      return new Response("Error fetching target site: " + e.message, { status: 500 });
+    }
   }
 };
