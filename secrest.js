@@ -1,4 +1,4 @@
-const WORKER_URL = "https://takumei.goku-0102-gg.workers.dev/";
+const WORKER_URL = "https://sercrest.goku/";
 
 /**
  * パスやURLの先頭にWorkerのURLを結合する
