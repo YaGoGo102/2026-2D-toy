@@ -1,0 +1,5 @@
+name = "takumei"
+compatibility_date = "2026-01-01"
+
+[site]
+bucket = "./public" # HTMLやJSが入っているフォルダ名（例: public または dist）
