@@ -2,39 +2,51 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // ターゲットを Discord に設定
-    const targetOrigin = "https://discord.com";
-    
-    // パスとクエリをそのままDiscordに向ける
-    const targetUrl = new URL(targetOrigin + url.pathname + url.search);
-    
-    // リクエストヘッダーの Host を discord.com に書き換える
-    const newHeaders = new Headers(request.headers);
-    newHeaders.set("Host", "discord.com");
-    // オリジンの偽装
-    newHeaders.set("Origin", "https://discord.com");
-    newHeaders.set("Referer", "https://discord.com/");
+    // パスの先頭の "/" を削ったものをターゲットURL文字列とする
+    // 例: "/https://discord.com/login" -> "https://discord.com/login"
+    let targetUrlStr = url.pathname.slice(1);
+    if (url.search) {
+      targetUrlStr += url.search;
+    }
 
-    const modifiedRequest = new Request(targetUrl, {
-      method: request.method,
-      headers: newHeaders,
-      body: request.body,
-      redirect: "manual" // リダイレクトループを防ぐため
-    });
+    // ターゲットURLが http または https で始まっているか確認
+    if (!targetUrlStr.startsWith("http://") && !targetUrlStr.startsWith("https://")) {
+      return new Response(
+        "【使い方】\nWorkerのURLの後ろに開きたいURLを続けて入力してください。\n例: " + url.origin + "/https://discord.com/",
+        { status: 400, headers: { "content-type": "text/plain; charset=utf-8" } }
+      );
+    }
 
     try {
-      let response = await fetch(modifiedRequest);
+      const targetUrl = new URL(targetUrlStr);
       
-      // リダイレクト（302など）が返ってきた場合、Discordのドメインを自分のWorkerのドメインに書き換える
+      // リクエストヘッダーの構築（Discordなどのサーバーに正しいHostを伝える）
+      const newHeaders = new Headers(request.headers);
+      newHeaders.set("Host", targetUrl.host);
+      newHeaders.set("Origin", targetUrl.origin);
+      newHeaders.set("Referer", targetUrl.origin + "/");
+
+      const modifiedRequest = new Request(targetUrl, {
+        method: request.method,
+        headers: newHeaders,
+        body: request.body,
+        redirect: "manual"
+      });
+
+      let response = await fetch(modifiedRequest);
+
+      // リダイレクト（302など）が発生した場合の処理
+      // プロキシ経由のURL（/https://...）を維持するように書き換える
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("Location");
         if (location) {
           let newLocation = location;
-          if (location.startsWith("https://discord.com")) {
-            newLocation = location.replace("https://discord.com", url.origin);
+          if (location.startsWith("http://") || location.startsWith("https://")) {
+            newLocation = `${url.origin}/${location}`;
           } else if (location.startsWith("/")) {
-            newLocation = url.origin + location;
+            newLocation = `${url.origin}/${targetUrl.origin}${location}`;
           }
+          
           const newRespHeaders = new Headers(response.headers);
           newRespHeaders.set("Location", newLocation);
           return new Response(response.body, {
@@ -44,14 +56,13 @@ export default {
         }
       }
 
-      // HTMLやJSなどのテキストデータの場合、中に含まれる "discord.com" を自分のWorkerのURLに置換する
+      // HTMLやJavaScript内のリンクを、このプロキシ経由のURLに書き換える
       const contentType = response.headers.get("content-type") || "";
       if (contentType.includes("text/html") || contentType.includes("application/javascript")) {
         let bodyText = await response.text();
         
-        // discord.com を自分のWorkerのオリジンに置換
-        bodyText = bodyText.replaceAll("https://discord.com", url.origin);
-        bodyText = bodyText.replaceAll("discord.com", url.host);
+        // ページ内のターゲットオリジンへのリンクをプロキシ形式に置換
+        bodyText = bodyText.replaceAll(targetUrl.origin, `${url.origin}/${targetUrl.origin}`);
 
         return new Response(bodyText, {
           status: response.status,
@@ -61,9 +72,3 @@ export default {
 
       // 画像やその他のデータはそのまま返す
       return new Response(response.body, response);
-
-    } catch (e) {
-      return new Response("Proxy Error: " + e.message, { status: 500 });
-    }
-  }
-};
